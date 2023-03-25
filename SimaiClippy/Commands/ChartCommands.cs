@@ -71,6 +71,7 @@ public class ChartCommands : BaseCommandModule
                     { $"EX_{NoteType.Hold}", 0 },
                     { NoteType.Slide.ToString(), 0 },
                     { NoteType.Touch.ToString(), 0 },
+                    { $"HANABI_TOUCH", 0 },
                     { NoteType.Break.ToString(), 0 },
                     { "BREAK", 0 },
                     { "BREAK_HOLD", 0 },
@@ -96,6 +97,10 @@ public class ChartCommands : BaseCommandModule
                             {
                                 breakdown[$"EX_{note.type}"] += 1;
                             }
+                            if (note.location.group != 0 && (note.styles & NoteStyle.Fireworks) != 0)
+                            {
+                                breakdown[$"HANABI_TOUCH"] += 1;
+                            }
                         } else
                         {
                             var isHold = note.length != null;
@@ -111,7 +116,7 @@ TOTAL           {maxCombo}
 TAP             {breakdown[NoteType.Tap.ToString()]} ({breakdown[$"EX_{NoteType.Tap}"]} EX)
 HOLD            {breakdown[NoteType.Hold.ToString()]} ({breakdown[$"EX_{NoteType.Hold}"]} EX)
 SLIDE           {breakdown[NoteType.Slide.ToString()]}
-TOUCH           {breakdown[NoteType.Touch.ToString()]}
+TOUCH           {breakdown[NoteType.Touch.ToString()]} ({breakdown[$"HANABI_TOUCH"]} fireworks)
 
 Total breaks:   {breakdown[NoteType.Break.ToString()]}
 - BREAK         {breakdown["BREAK"]}
