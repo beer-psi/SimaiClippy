@@ -97,7 +97,7 @@ public class ChartCommands : BaseCommandModule
                             {
                                 breakdown[$"EX_{note.type}"] += 1;
                             }
-                            if (note.location.group != 0 && (note.styles & NoteStyle.Fireworks) != 0)
+                            if (note.location.group != NoteGroup.Tap && (note.styles & NoteStyle.Fireworks) != 0)
                             {
                                 breakdown[$"HANABI_TOUCH"] += 1;
                             }
