@@ -6,6 +6,7 @@ using Qmmands.Text;
 using SimaiSharp;
 using SimaiSharp.Internal.Errors;
 using SimaiSharp.Structures;
+using static Disqord.Discord.Limits;
 
 namespace SimaiClippy.Commands;
 
@@ -85,7 +86,17 @@ public class ChartCommands : DiscordTextModuleBase
         }
 
         var attachment = Context.Message.Attachments[0];
-        var content = await DownloadFile(attachment.Url);
+        string content;
+        try
+        {
+            content = await DownloadFile(attachment.Url);
+        }
+        catch (InvalidOperationException)
+        {
+            return Reply(new LocalMessage()
+                .WithContent("Couldn't read the chart. Try saving it as UTF-8 (without BOM) and try again.")
+                .WithAllowedMentions(LocalAllowedMentions.None));
+        }
 
         var simaiFile = new SimaiFile(content);
         var rawCharts = simaiFile.ToKeyValuePairs()
@@ -102,6 +113,10 @@ public class ChartCommands : DiscordTextModuleBase
             catch (SimaiException ex)
             {
                 message = $"```\n{HumanizeSimaiException(ex)}\n```";
+            }
+            catch (Exception ex)
+            {
+                message = $"An error occured in SimaiSharp. Your chart is probably super fucked up.\n```\n{ex}\n```";
             }
 
             results.Add(rawChart.Key, message);
@@ -125,7 +140,17 @@ public class ChartCommands : DiscordTextModuleBase
         }
 
         var attachment = Context.Message.Attachments[0];
-        var content = await DownloadFile(attachment.Url);
+        string content;
+        try
+        {
+            content = await DownloadFile(attachment.Url);
+        }
+        catch (InvalidOperationException)
+        {
+            return Reply(new LocalMessage()
+                .WithContent("Couldn't read the chart. Try saving it as UTF-8 (without BOM) and try again.")
+                .WithAllowedMentions(LocalAllowedMentions.None));
+        }
 
         var simaiFile = new SimaiFile(content);
         var rawCharts = simaiFile.ToKeyValuePairs()
@@ -202,6 +227,10 @@ public class ChartCommands : DiscordTextModuleBase
             catch (SimaiException ex)
             {
                 results.Add(rawChart.Key, $"```\n{HumanizeSimaiException(ex)}\n```");
+            }
+            catch (Exception ex)
+            {
+                results.Add(rawChart.Key, $"An error occured in SimaiSharp. Your chart is probably super fucked up.\n```\n{ex}\n```");
             }
         }
 
