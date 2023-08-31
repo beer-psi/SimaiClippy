@@ -1,63 +1,137 @@
-﻿using DSharpPlus.CommandsNext;
-using DSharpPlus.CommandsNext.Attributes;
-using DSharpPlus.Entities;
+﻿// ReSharper disable UnusedMember.Global
+using Disqord;
+using Disqord.Bot.Commands.Text;
+using Qmmands;
+using Qmmands.Text;
 using SimaiSharp;
+using SimaiSharp.Internal.Errors;
 using SimaiSharp.Structures;
 
 namespace SimaiClippy.Commands;
 
-public class ChartCommands : BaseCommandModule
+public class ChartCommands : DiscordTextModuleBase
 {
-    static private String Cache { get
-        {
-            return Path.Join(AppDomain.CurrentDomain.BaseDirectory, "cache");
-        } 
+    private static async Task<string> DownloadFile(string url)
+    {
+        using var client = new HttpClient();
+        var resp = await client.GetAsync(url);
+        return await resp.Content.ReadAsStringAsync();
     }
 
-    private async Task downloadFile(string filePath, string Url)
+    private IResult? CheckAttachmentInput()
     {
-        using (var client = new HttpClient())
+        if (Context.Message.Attachments.Count < 1)
         {
-            Directory.CreateDirectory(Cache);
+            return Reply(new LocalMessage()
+                .WithAllowedMentions(LocalAllowedMentions.None)
+                .WithContent("Give me a chart!"));
+        }
 
-            using var file = new FileStream(filePath, FileMode.CreateNew);
+        var attachment = Context.Message.Attachments[0];
 
-            var resp = await client.GetAsync(Url);
-            await resp.Content.CopyToAsync(file);
+        // ReSharper disable once InvertIf
+        if (attachment.ContentType == null || !attachment.ContentType.Contains("text/plain"))
+        {
+            return Reply(new LocalMessage()
+                .WithAllowedMentions(LocalAllowedMentions.None)
+                .WithContent($"Input file is not text! Received file of type `{attachment.ContentType}`")
+            );
+        }
+
+        return null;
+    }
+
+    private static string HumanizeSimaiException(SimaiException ex)
+    {
+        switch (ex)
+        {
+            case InvalidSyntaxException:
+                return $"Invalid location declaration (line {ex.line}, char {ex.character}).";
+            case ScopeMismatchException castedEx:
+            {
+                var whatShouldBeAttachedTo = new List<string>();
+                if ((castedEx.correctScope & ScopeMismatchException.ScopeType.Note) != 0)
+                {
+                    whatShouldBeAttachedTo.Add("notes");
+                }
+
+                if ((castedEx.correctScope & ScopeMismatchException.ScopeType.Slide) != 0)
+                {
+                    whatShouldBeAttachedTo.Add("slides");
+                }
+
+                return (castedEx.correctScope & ScopeMismatchException.ScopeType.Global) != 0
+                    ? $"Items should be declared outside of note scope (line {castedEx.line}, char {castedEx.character})."
+                    : $"Items should be attached to {string.Join(", or ", whatShouldBeAttachedTo)} (line {castedEx.line}, char {castedEx.character}).";
+            }
+            case UnsupportedSyntaxException:
+                return $"Unsupported syntax used (line {ex.line}, char {ex.character}).";
+            case UnterminatedSectionException:
+                return $"Unterminated section (line {ex.line}, char {ex.character}).";
+            default:
+                return $"Unknown error (line {ex.line}, char {ex.character}).";
         }
     }
 
-    private async Task<DiscordAttachment?> checkAttachmentInput(CommandContext ctx)
+    [TextCommand("check", "c")]
+    public async Task<IResult> Check(string[]? charts = null)
     {
+        charts ??= Array.Empty<string>();
 
-        if (ctx.Message.Attachments.Count < 1)
+        var check = CheckAttachmentInput();
+        if (check != null)
         {
-            await ctx.RespondAsync("Give me a chart!");
-            return null;
+            return check;
         }
 
-        var chartAttachment = ctx.Message.Attachments[0];
-        if (!chartAttachment.MediaType.Contains("text/plain"))
-        {
-            await ctx.RespondAsync($"Input file is not text! Received media type of {chartAttachment.MediaType}");
-            return null;
-        }
-        return chartAttachment;
-    }
+        var attachment = Context.Message.Attachments[0];
+        var content = await DownloadFile(attachment.Url);
 
-    [Command("breakdown")]
-    [Description("Create a breakdown by note type of your chart")]
-    public async Task BreakdownCommand(CommandContext ctx, params string[] charts)
-    {
-        var chartAttachment = await checkAttachmentInput(ctx);
-        if (chartAttachment == null) { return; }
-
-        var filename = Path.Join(Cache, chartAttachment.GetHashCode().ToString() + ".txt");
-        await downloadFile(filename, chartAttachment.Url);
-
-        var simaiFile = new SimaiFile(filename);
-        var rawCharts = simaiFile.ToKeyValuePairs().Where(c => (charts.Length <= 0 || charts.Contains(c.Key)) && c.Key.Contains("inote_"));
+        var simaiFile = new SimaiFile(content);
+        var rawCharts = simaiFile.ToKeyValuePairs()
+            .Where(c => (charts.Length == 0 || charts.Contains(c.Key)) && c.Key.Contains("inote_"));
         var results = new Dictionary<string, string>();
+
+        foreach (var rawChart in rawCharts)
+        {
+            var message = ":white_check_mark:";
+            try
+            {
+                SimaiConvert.Deserialize(rawChart.Value);
+            }
+            catch (SimaiException ex)
+            {
+                message = $"```\n{HumanizeSimaiException(ex)}\n```";
+            }
+
+            results.Add(rawChart.Key, message);
+        }
+
+        var msg = string.Join('\n', results.Select(res => $"{res.Key}: {res.Value}"));
+        return Reply(new LocalMessage()
+            .WithContent(msg)
+            .WithAllowedMentions(LocalAllowedMentions.None));
+    }
+
+    [TextCommand("breakdown")]
+    public async Task<IResult> Breakdown(string[]? charts = null)
+    {
+        charts ??= Array.Empty<string>();
+
+        var check = CheckAttachmentInput();
+        if (check != null)
+        {
+            return check;
+        }
+
+        var attachment = Context.Message.Attachments[0];
+        var content = await DownloadFile(attachment.Url);
+
+        var simaiFile = new SimaiFile(content);
+        var rawCharts = simaiFile.ToKeyValuePairs()
+            .Where(c => (charts.Length == 0 || charts.Contains(c.Key)) && c.Key.Contains("inote_"));
+        var results = new Dictionary<string, string>();
+
         foreach (var rawChart in rawCharts)
         {
             try
@@ -71,7 +145,7 @@ public class ChartCommands : BaseCommandModule
                     { $"EX_{NoteType.Hold}", 0 },
                     { NoteType.Slide.ToString(), 0 },
                     { NoteType.Touch.ToString(), 0 },
-                    { $"HANABI_TOUCH", 0 },
+                    { "HANABI_TOUCH", 0 },
                     { NoteType.Break.ToString(), 0 },
                     { "BREAK", 0 },
                     { "BREAK_HOLD", 0 },
@@ -79,16 +153,13 @@ public class ChartCommands : BaseCommandModule
                     { "EX_BREAK", 0 },
                     { "EX_BREAK_HOLD", 0 },
                 };
-                for (var i = 0; i < chart.noteCollections.Count; i++)
+                foreach (var collection in chart.NoteCollections)
                 {
-                    var collection = chart.noteCollections[i];
-                    for (var j = 0; j < collection.Count; j++)
+                    foreach (var note in collection)
                     {
-                        var note = collection[j];
-
-                        breakdown[NoteType.Slide.ToString()] += note.slidePaths.Where(s => s.type == NoteType.Slide).Count();
-                        breakdown["BREAK_SLIDE"] += note.slidePaths.Where(s => s.type == NoteType.Break).Count();
-                        breakdown[NoteType.Break.ToString()] += note.slidePaths.Where(s => s.type == NoteType.Break).Count();
+                        breakdown[NoteType.Slide.ToString()] += note.slidePaths.Count(s => s.type == NoteType.Slide);
+                        breakdown["BREAK_SLIDE"] += note.slidePaths.Count(s => s.type == NoteType.Break);
+                        breakdown[NoteType.Break.ToString()] += note.slidePaths.Count(s => s.type == NoteType.Break);
 
                         if (note.type != NoteType.Break && note.type != NoteType.ForceInvalidate)
                         {
@@ -97,9 +168,9 @@ public class ChartCommands : BaseCommandModule
                             {
                                 breakdown[$"EX_{note.type}"] += 1;
                             }
-                            if (note.location.group != NoteGroup.Tap && (note.styles & NoteStyle.Fireworks) != 0)
+                            if (note.location.group != NoteGroup.Tap && (note.styles & NoteStyles.Fireworks) != 0)
                             {
-                                breakdown[$"HANABI_TOUCH"] += 1;
+                                breakdown["HANABI_TOUCH"] += 1;
                             }
                         } else
                         {
@@ -110,60 +181,33 @@ public class ChartCommands : BaseCommandModule
                     }
                 }
                 var maxCombo = Enum.GetValues(typeof(NoteType)).Cast<NoteType>().Sum(e => { breakdown.TryGetValue(e.ToString(), out var t); return t; });
-                results.Add(rawChart.Key, $@"```
-TOTAL           {maxCombo}
+                results.Add(rawChart.Key, $"""
+                                           ```
+                                           TOTAL           {maxCombo}
 
-TAP             {breakdown[NoteType.Tap.ToString()]} ({breakdown[$"EX_{NoteType.Tap}"]} EX)
-HOLD            {breakdown[NoteType.Hold.ToString()]} ({breakdown[$"EX_{NoteType.Hold}"]} EX)
-SLIDE           {breakdown[NoteType.Slide.ToString()]}
-TOUCH           {breakdown[NoteType.Touch.ToString()]} ({breakdown[$"HANABI_TOUCH"]} fireworks)
+                                           TAP             {breakdown[NoteType.Tap.ToString()]} ({breakdown[$"EX_{NoteType.Tap}"]} EX)
+                                           HOLD            {breakdown[NoteType.Hold.ToString()]} ({breakdown[$"EX_{NoteType.Hold}"]} EX)
+                                           SLIDE           {breakdown[NoteType.Slide.ToString()]}
+                                           TOUCH           {breakdown[NoteType.Touch.ToString()]} ({breakdown[$"HANABI_TOUCH"]} fireworks)
 
-Total breaks:   {breakdown[NoteType.Break.ToString()]}
-- BREAK         {breakdown["BREAK"]}
-- EX BREAK      {breakdown["EX_BREAK"]}
-- BREAK HOLD    {breakdown["BREAK_HOLD"]}
-- EX BREAK HOLD {breakdown["EX_BREAK_HOLD"]}
-- BREAK SLIDE   {breakdown["BREAK_SLIDE"]}
-```");
+                                           Total breaks:   {breakdown[NoteType.Break.ToString()]}
+                                           - BREAK         {breakdown["BREAK"]}
+                                           - EX BREAK      {breakdown["EX_BREAK"]}
+                                           - BREAK HOLD    {breakdown["BREAK_HOLD"]}
+                                           - EX BREAK HOLD {breakdown["EX_BREAK_HOLD"]}
+                                           - BREAK SLIDE   {breakdown["BREAK_SLIDE"]}
+                                           ```
+                                           """);
             }
-            catch (Exception ex)
+            catch (SimaiException ex)
             {
-                results.Add(rawChart.Key, $"```\n{ex.Message}\n```");
-            }
-        }
-
-        var msg = string.Join('\n', results.Select(res => $"{res.Key}: {res.Value}"));
-        await ctx.RespondAsync(msg);
-        File.Delete(filename);
-    }
-
-    [Command("check")]
-    [Description("Checks your chart for any syntax errors")]
-    public async Task CheckCommand(CommandContext ctx, params string[] charts)
-    {
-        var chartAttachment = await checkAttachmentInput(ctx);
-        if (chartAttachment == null) { return; }
-
-        var filename = Path.Join(Cache, chartAttachment.GetHashCode().ToString() + ".txt");
-        await downloadFile(filename, chartAttachment.Url);
-
-        var simaiFile = new SimaiFile(filename);
-        var rawCharts = simaiFile.ToKeyValuePairs().Where(c => (charts.Length <= 0 || charts.Contains(c.Key)) && c.Key.Contains("inote_"));
-        var results = new Dictionary<string, string>();
-        foreach (var rawChart in rawCharts)
-        {
-            try
-            {
-                var chart = SimaiConvert.Deserialize(rawChart.Value);
-                results.Add(rawChart.Key, ":white_check_mark:");
-            } catch (Exception ex)
-            {
-                results.Add(rawChart.Key, $"```\n{ex.Message}\n```");
+                results.Add(rawChart.Key, $"```\n{HumanizeSimaiException(ex)}\n```");
             }
         }
 
         var msg = string.Join('\n', results.Select(res => $"{res.Key}: {res.Value}"));
-        await ctx.RespondAsync(msg);
-        File.Delete(filename);
+        return Reply(new LocalMessage()
+            .WithContent(msg)
+            .WithAllowedMentions(LocalAllowedMentions.None));
     }
 }

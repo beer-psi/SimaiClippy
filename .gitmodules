@@ -1,0 +1,3 @@
+[submodule "SimaiSharp"]
+	path = SimaiSharp
+	url = https://github.com/reflektone-games/SimaiSharp.git

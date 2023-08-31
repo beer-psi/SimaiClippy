@@ -1,31 +1,36 @@
-﻿// See https://aka.ms/new-console-template for more information
-using DSharpPlus;
-using DSharpPlus.CommandsNext;
-using DSharpPlus.Entities;
-using Microsoft.Extensions.DependencyInjection;
-using System.Reflection;
+﻿using Disqord.Bot.Hosting;
+using Disqord.Gateway;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-
-static async Task MainAsync()
-{
-    var client = new DiscordClient(new DiscordConfiguration()
+var builder = new HostBuilder()
+    .ConfigureHostConfiguration(host => host.AddEnvironmentVariables("CHEAP_"))
+    .ConfigureAppConfiguration((ctx, config) =>
     {
-        Token = "YOUR_TOKEN_GOES_HERE",
-        TokenType = TokenType.Bot,
-        Intents = DiscordIntents.AllUnprivileged | DiscordIntents.MessageContents,
-        MinimumLogLevel = Microsoft.Extensions.Logging.LogLevel.Debug,
-    });
+        var env = ctx.HostingEnvironment;
+        config.AddJsonFile("appsettings.json", false, true);
 
-    var commands = client.UseCommandsNext(new CommandsNextConfiguration()
+        if (File.Exists($"appsettings.{env.EnvironmentName}.json"))
+            config.AddJsonFile($"appsettings.{env.EnvironmentName}.json", true, true);
+    })
+    .ConfigureLogging(logging =>
     {
-        StringPrefixes = new[] { "?" }
-    });
-    commands.RegisterCommands(Assembly.GetExecutingAssembly());
+        logging.AddSimpleConsole();
+    })
+    .ConfigureDiscordBot((context, bot) =>
+    {
+        bot.Token = context.Configuration["Token"];
+        bot.Prefixes = new[] { "?" };
+        bot.Intents = GatewayIntents.Unprivileged | GatewayIntents.MessageContent;
+        bot.ServiceAssemblies = AppDomain.CurrentDomain.GetAssemblies();
+    })
+    .UseDefaultServiceProvider(options =>
+    {
+        options.ValidateScopes = true;
+        options.ValidateOnBuild = true;
+    })
+    .UseConsoleLifetime();
 
-    var activity = new DiscordActivity("?check", ActivityType.ListeningTo);
-    
-    await client.ConnectAsync(activity);
-    await Task.Delay(-1);
-}
-
-MainAsync().GetAwaiter().GetResult();
+var host = builder.Build();
+await host.RunAsync();
