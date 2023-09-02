@@ -3,6 +3,10 @@ using Disqord.Gateway;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SimaiClippy.Text;
+using System.Text;
+
+Encoding.RegisterProvider(Utf8SigEncodingProvider.Instance);
 
 var builder = new HostBuilder()
     .ConfigureHostConfiguration(host => host.AddEnvironmentVariables("CHEAP_"))
